@@ -7,12 +7,13 @@ from pathlib import Path
 
 from sentinel_agent.agent.adk_agent import build_adk_agent_hierarchy
 from sentinel_agent.agent.core import CloudOpsSentinelOrchestrator
+from sentinel_agent.infrastructure_iac import TERRAFORM_MAIN_HCL, build_terraform_json_manifest
 
 EVAL_DATASET_PATH = Path(__file__).resolve().parent / "eval_dataset.json"
 
 
 def test_adk_hierarchy_and_compaction_wiring() -> None:
-    """Verify native Google ADK Coordinator, 4 Worker Sub-Agents, and callbacks are properly wired."""
+    """Verify native Google ADK Coordinator, 4 Worker Sub-Agents, Terraform IaC, and callbacks are properly wired."""
     coordinator, workers, adk_app = build_adk_agent_hierarchy()
     assert coordinator.name == "SentinelCoordinatorAgent"
     assert len(workers) == 4
@@ -24,6 +25,9 @@ def test_adk_hierarchy_and_compaction_wiring() -> None:
         "RemediationExecutionAgent",
     }
     assert adk_app is not None
+    assert "google_cloud_run_v2_service" in TERRAFORM_MAIN_HCL
+    manifest = build_terraform_json_manifest()
+    assert "google_cloud_run_v2_service" in manifest["resource"]
 
 
 def test_golden_dataset_regression_suite() -> None:

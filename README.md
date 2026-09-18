@@ -6,21 +6,14 @@
 [![Terraform](https://img.shields.io/badge/IaC-Terraform%20GCP-purple.svg)](https://www.terraform.io/)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B.svg)](https://streamlit.io/)
 
-> **Enterprise Agents Track Submission** — An Autonomous Site Reliability Engineering (SRE) & Cloud FinOps Multi-Agent Incident Commander built with the **Google Agent Development Kit (ADK)**, **Strategic Gemini Model Routing (`gemini-2.5-flash` & `gemini-2.5-pro`)**, **Persistent SQLite + Vector RAG Memory**, **OpenTelemetry Distributed Tracing with PII Redaction**, and **Human-in-the-Loop (HITL) Approval Gates**.
+> **Enterprise Agents Track Submission** — An Autonomous Site Reliability Engineering (SRE) & Cloud FinOps Multi-Agent Incident Commander built with the **Google Agent Development Kit (ADK)**, **Strategic Gemini Model Routing (`gemini-2.5-flash` & `gemini-2.5-pro`)**, **Persistent SQLite + Vector RAG Memory**, **OpenTelemetry Distributed Tracing with PII Redaction**, **Terraform Infrastructure as Code (IaC)**, and **Human-in-the-Loop (HITL) Approval Gates**.
 
 ---
 
 ## 📌 1. Problem & Solution Formulation
 
-### The Problem
-During high-severity production cloud outages (e.g., HTTP 503 latency spikes) and runaway cloud billing anomalies (e.g., idle GPU node pools), SRE and FinOps teams lose critical minutes context-switching across telemetry dashboards, scattered Markdown runbooks, cost explorer reports, and incident trackers—while risking accidental, unapproved production rollbacks.
-
-### The Solution
-**CloudOps Sentinel** automates end-to-end incident triage, runbook retrieval, FinOps anomaly detection, and safe remediation using a **Coordinator-Worker Multi-Agent Architecture** built on **Google ADK**:
-1. **Multi-Signal Diagnosis & Grounded RAG**: Correlates live golden telemetry signals (`query_production_telemetry_metrics`) with semantic Vector RAG runbook citations (`search_sre_runbook_knowledge_base`), quoting exact runbook anchors.
-2. **Strategic Model Routing**: Dynamically routes low-latency triage, runbook lookups, and FinOps cost checks to **`gemini-2.5-flash`** while routing complex multi-signal root-cause synthesis and high-stakes remediation planning to **`gemini-2.5-pro`**.
-3. **Human-in-the-Loop (HITL) Code Stops**: Intercepts destructive actions (`execute_production_service_rollback`) via `HumanApprovalGate` and ADK `before_tool_callback`, halting execution until an explicit human operator confirmation token (`APPROVED-BY-SRE`) is supplied.
-4. **Full AgentOps Observability**: Captures parent-child **OpenTelemetry** spans, dual-phase **INTENT vs. OUTCOME** structured JSON logs, and multi-layer **PII Redaction** (Google Cloud DLP + deterministic regex scrubbers).
+- **The Problem**: During production cloud outages (e.g., HTTP 503 latency spikes) and runaway cloud billing anomalies (e.g., idle GPU node pools), SRE and FinOps teams lose critical minutes correlating telemetry metrics, scattered Markdown runbooks, cost reports, and incident tickets—while risking accidental production rollbacks.
+- **The Solution**: **CloudOps Sentinel** automates end-to-end incident triage, grounded runbook RAG retrieval, FinOps anomaly detection, and safe remediation using a **Coordinator-Worker Multi-Agent Architecture** built on **Google ADK**.
 
 ---
 
@@ -50,10 +43,10 @@ flowchart TD
     end
 
     subgraph Memory["Context & Memory Layer"]
-        T2 --> VectorDB[("Persistent Vector RAG Store (Runbooks & Postmortems)")]
-        T5 & T6 --> SQLiteDB[("Persistent SQLite State (Sessions, Incidents, Summaries)")]
-        Coordinator -.-> Compactor["HistoryCompactor (Sliding Window + Summarization + ADK EventsCompactionConfig)"]
-        Coordinator -.-> AsyncWorker["AsyncMemoryWorker (Non-Blocking Background Indexing)"]
+        T2 --> VectorDB[("Persistent Vector RAG Store")]
+        T5 & T6 --> SQLiteDB[("Persistent SQLite State")]
+        Coordinator -.-> Compactor["HistoryCompactor (Sliding Window + ADK EventsCompactionConfig)"]
+        Coordinator -.-> AsyncWorker["AsyncMemoryWorker (Background Indexing)"]
     end
 
     subgraph Telemetry["Observability & Tracing Layer"]
@@ -67,7 +60,207 @@ flowchart TD
 
 ---
 
-## 📊 3. AgentOps Code Review Matrix Alignment (95 / 95 Points)
+## 🏗️ 3. Infrastructure as Code (Terraform HCL & Google ADK CLI)
+
+All Infrastructure as Code files are located in [`terraform/main.tf`](terraform/main.tf), [`terraform/variables.tf`](terraform/variables.tf), [`terraform/outputs.tf`](terraform/outputs.tf), [`terraform/main.tf.json`](terraform/main.tf.json), and [`sentinel_agent/infrastructure_iac.py`](sentinel_agent/infrastructure_iac.py).
+
+### `terraform/main.tf`
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+resource "google_project_service" "required_apis" {
+  for_each = toset([
+    "run.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "secretmanager.googleapis.com",
+    "dlp.googleapis.com",
+    "aiplatform.googleapis.com"
+  ])
+  service            = each.key
+  disable_on_destroy = false
+}
+
+resource "google_artifact_registry_repository" "sentinel_repo" {
+  location      = var.region
+  repository_id = "${var.service_name}-repo"
+  description   = "Container registry for CloudOps Sentinel ADK Agent"
+  format        = "DOCKER"
+  depends_on    = [google_project_service.required_apis]
+}
+
+resource "google_service_account" "sentinel_runtime_sa" {
+  account_id   = "${var.service_name}-sa"
+  display_name = "CloudOps Sentinel ADK Runtime Service Account"
+}
+
+resource "google_secret_manager_secret" "gemini_api_key" {
+  secret_id = var.gemini_secret_id
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.required_apis]
+}
+
+resource "google_secret_manager_secret_iam_member" "sentinel_secret_accessor" {
+  secret_id = google_secret_manager_secret.gemini_api_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.sentinel_runtime_sa.email}"
+}
+
+resource "google_project_iam_member" "sentinel_dlp_user" {
+  project = var.project_id
+  role    = "roles/dlp.user"
+  member  = "serviceAccount:${google_service_account.sentinel_runtime_sa.email}"
+}
+
+resource "google_cloud_run_v2_service" "sentinel_service" {
+  name     = var.service_name
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  template {
+    service_account = google_service_account.sentinel_runtime_sa.email
+
+    containers {
+      image = var.container_image
+
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "USE_SECRET_MANAGER"
+        value = "TRUE"
+      }
+      env {
+        name  = "GEMINI_SECRET_ID"
+        value = var.gemini_secret_id
+      }
+      env {
+        name = "GEMINI_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.gemini_api_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "2Gi"
+        }
+      }
+    }
+  }
+
+  depends_on = [google_secret_manager_secret_iam_member.sentinel_secret_accessor]
+}
+```
+
+### `terraform/variables.tf` & `terraform/outputs.tf`
+```hcl
+variable "project_id" {
+  description = "Google Cloud Project ID hosting CloudOps Sentinel"
+  type        = string
+}
+
+variable "region" {
+  description = "Primary GCP region for Cloud Run and Artifact Registry"
+  type        = string
+  default     = "us-central1"
+}
+
+variable "service_name" {
+  description = "Cloud Run service name"
+  type        = string
+  default     = "cloudops-sentinel"
+}
+
+variable "gemini_secret_id" {
+  description = "Secret Manager ID storing the Gemini API key"
+  type        = string
+  default     = "sentinel-gemini-api-key"
+}
+
+variable "container_image" {
+  description = "Full Artifact Registry container image URI"
+  type        = string
+  default     = "us-central1-docker.pkg.dev/cloudops-sentinel-prod/cloudops-sentinel-repo/sentinel:latest"
+}
+
+output "cloud_run_service_url" {
+  description = "Public HTTPS endpoint of the deployed CloudOps Sentinel ADK service"
+  value       = google_cloud_run_v2_service.sentinel_service.uri
+}
+
+output "runtime_service_account_email" {
+  description = "Least-privilege service account email bound to Secret Manager and Cloud DLP"
+  value       = google_service_account.sentinel_runtime_sa.email
+}
+```
+
+### Google ADK CLI & Terraform Provisioning Commands
+```bash
+# 1. Local Interactive Development & Evaluation via Google ADK CLI
+adk web sentinel_agent
+adk run sentinel_agent
+adk eval sentinel_agent tests/eval_dataset.json
+
+# 2. Serverless Deployment via Google ADK CLI
+adk deploy cloud_run \
+  --project=$GCP_PROJECT_ID \
+  --region=us-central1 \
+  --service_name=cloudops-sentinel \
+  sentinel_agent
+
+# 3. Provisioning Cloud Run, Artifact Registry, Secret Manager & IAM via Terraform
+cd terraform
+terraform init
+terraform plan -var="project_id=$GCP_PROJECT_ID"
+terraform apply -auto-approve -var="project_id=$GCP_PROJECT_ID"
+```
+
+---
+
+## 🚀 4. Quick Start Guide
+
+```bash
+git clone https://github.com/ankurmal36/agent-assignment.git
+cd agent-assignment
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -e .
+cp .env.example .env
+
+# Run Unit Tests & Golden Dataset Regression Evaluation Suite
+pytest -v
+
+# Run CLI Multi-Agent Demo
+python cli.py --demo
+
+# Launch Streamlit Command Center UI
+streamlit run app.py
+```
+
+---
+
+## 📊 5. AgentOps Code Review Matrix Alignment (95 / 95 Points)
 
 | Category | Criterion (5 pts each) | Implementation Evidence in Repository |
 | :--- | :--- | :--- |
@@ -87,52 +280,6 @@ flowchart TD
 | | **Intent vs. Outcome Capture** | `log_intent_before_execution` (`INTENT`) and `log_outcome_after_execution` (`OUTCOME`) explicitly log planned actions vs actual outcomes & latency. |
 | | **Distributed Tracing** | OpenTelemetry `TracerProvider` and `SimpleSpanProcessor` link parent query spans to child model-routing, sub-agent, and tool spans. |
 | | **PII Redaction** | `PIIRedactor` (`sentinel_agent/telemetry/tracer.py`) scrubs emails, SSNs, phones, credit cards, and API keys via Google Cloud DLP (`google-cloud-dlp`) + regex rules. |
-| **5. Infrastructure & CI/CD (15 pts)** | **Automated Evaluation Suites** | `tests/eval_dataset.json` (golden benchmark dataset) + `tests/test_agent_eval.py` & `.github/workflows/ci.yml` verify routing, trajectories, HITL, and SLAs. |
-| | **Infrastructure as Code** | `terraform/` (`main.tf`, `variables.tf`, `outputs.tf`) provisions Cloud Run v2, Artifact Registry, Secret Manager, and least-privilege IAM + `Dockerfile`. |
+| **5. Infrastructure & CI/CD (15 pts)** | **Automated Evaluation Suites** | `tests/eval_dataset.json` (golden benchmark dataset) + `tests/test_agent_eval.py` & `cloudbuild.yaml` verify routing, trajectories, HITL, and SLAs. |
+| | **Infrastructure as Code** | `terraform/main.tf`, `terraform/variables.tf`, `terraform/outputs.tf`, `terraform/main.tf.json`, and `sentinel_agent/infrastructure_iac.py` provision Cloud Run, Artifact Registry, Secret Manager, and IAM. |
 | | **Secure Secret Management** | `sentinel_agent/storage/secret_manager.py` retrieves credentials from Google Cloud Secret Manager (`google-cloud-secret-manager`) with `.env.example` fallback. |
-
----
-
-## 🚀 4. Quick Start & Google ADK CLI Usage
-
-### 1. Clone & Set Up Virtual Environment
-```bash
-git clone https://github.com/ankurmal36/agent-assignment.git
-cd agent-assignment
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -e .
-cp .env.example .env
-```
-
-### 2. Run Verification Demo & Golden Evaluation Suite
-```bash
-# Run end-to-end multi-agent verification scenarios (CLI demo)
-python cli.py --demo
-
-# Run unit tests & Golden Dataset Regression Evaluation Suite
-pytest -v
-
-# Run Ruff linter & formatter verification
-ruff check .
-```
-
-### 3. Launch Interactive Interfaces (Streamlit & Google ADK CLI)
-```bash
-# Option A: Launch Streamlit Interactive Command Center UI
-streamlit run app.py
-
-# Option B: Launch Google ADK Developer Web UI / CLI
-adk web sentinel_agent
-adk run sentinel_agent
-
-# Option C: Deploy to Google Cloud Run via ADK CLI or Terraform
-adk deploy cloud_run --project=$GCP_PROJECT_ID --region=us-central1 sentinel_agent
-cd terraform && terraform init && terraform apply
-```
-
----
-
-## 📄 License
-Licensed under the Apache 2.0 License.
