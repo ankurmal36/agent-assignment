@@ -1,0 +1,57 @@
+{
+  "services": {
+    "checkout-payment-service": {
+      "current_revision": "v2.14.0-canary",
+      "last_stable_revision": "v2.13.4-stable",
+      "error_rate_percent": 14.8,
+      "p99_latency_ms": 2480.0,
+      "cpu_utilization_percent": 89.5,
+      "db_connection_pool_saturation_percent": 98.2,
+      "status": "CRITICAL_DEGRADATION",
+      "anomalous_signals": [
+        "HTTP 503 error rate spiked from 0.2% to 14.8% after v2.14.0-canary deploy",
+        "Cloud SQL connection pool saturation at 98.2%"
+      ]
+    },
+    "identity-auth-service": {
+      "current_revision": "v4.8.2",
+      "last_stable_revision": "v4.8.1",
+      "error_rate_percent": 3.4,
+      "p99_latency_ms": 640.0,
+      "cpu_utilization_percent": 72.1,
+      "db_connection_pool_saturation_percent": 54.0,
+      "status": "WARNING",
+      "anomalous_signals": [
+        "Redis session cache hit ratio dropped from 97% to 61%"
+      ]
+    },
+    "ml-inference-cluster": {
+      "current_revision": "v1.9.0-gpu",
+      "last_stable_revision": "v1.8.5-gpu",
+      "error_rate_percent": 0.1,
+      "p99_latency_ms": 310.0,
+      "cpu_utilization_percent": 41.0,
+      "db_connection_pool_saturation_percent": 18.0,
+      "status": "HEALTHY_HIGH_COST",
+      "anomalous_signals": [
+        "16x A100 GPU nodes idle at <8% utilization for 14 hours"
+      ]
+    }
+  },
+  "cost_reports": {
+    "ml-inference-cluster": {
+      "daily_baseline_usd": 1450.0,
+      "current_daily_spend_usd": 4120.0,
+      "variance_percent": 184.1,
+      "primary_cost_driver": "Unscaled A100-80GB GKE Node Pool (gpu-highmem-pool-02)",
+      "recommended_finops_action": "Cordon and scale gpu-highmem-pool-02 from 16 nodes to 2 min-nodes; saves ~$2,670/day."
+    },
+    "checkout-payment-service": {
+      "daily_baseline_usd": 620.0,
+      "current_daily_spend_usd": 790.0,
+      "variance_percent": 27.4,
+      "primary_cost_driver": "Retry storm egress & Cloud SQL read-replica autoscale during 503 outage",
+      "recommended_finops_action": "Rollback v2.14.0-canary to stop client retry storm."
+    }
+  }
+}

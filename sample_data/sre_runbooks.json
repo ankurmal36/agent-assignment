@@ -1,0 +1,36 @@
+[
+  {
+    "doc_id": "RUNBOOK-PAYMENT-503",
+    "title": "Checkout & Payment Gateway 5xx Latency Spike Runbook",
+    "service_domain": "checkout-payment-service",
+    "section_anchor": "https://runbooks.internal.example/sre/checkout-payment#connection-pool-exhaustion",
+    "content": "When checkout-payment-service experiences HTTP 503 errors > 5% and p99 latency > 1500ms following a canary release (e.g., v2.14.0-canary), Cloud SQL connection pool exhaustion is the primary root cause. Immediately open a critical P0/P1 incident and execute a production service rollback to revision v2.13.4-stable after obtaining Human-in-the-Loop approval.",
+    "remediation_steps": [
+      "Verify service error rate and p99 latency via query_production_telemetry_metrics.",
+      "Create an incident ticket via create_critical_incident_ticket.",
+      "Obtain Human-in-the-Loop confirmation and execute execute_production_service_rollback to v2.13.4-stable."
+    ]
+  },
+  {
+    "doc_id": "RUNBOOK-AUTH-REDIS-OOM",
+    "title": "Identity & Auth Token Service Redis Memory Eviction Runbook",
+    "service_domain": "identity-auth-service",
+    "section_anchor": "https://runbooks.internal.example/sre/identity-auth#redis-memory-pressure",
+    "content": "Elevated 401/500 errors on identity-auth-service accompanied by Redis cache hit ratio dropping below 65% indicate session TTL misconfiguration. Roll back the offending config revision or flush stale anonymous session keys.",
+    "remediation_steps": [
+      "Check identity-auth-service metrics with query_production_telemetry_metrics.",
+      "Consult Redis TTL policy and record preventative action via record_postmortem_action_item."
+    ]
+  },
+  {
+    "doc_id": "RUNBOOK-FINOPS-GPU-SPIKE",
+    "title": "Vertex AI & GKE GPU Autoscaler Cost Anomaly Playbook",
+    "service_domain": "ml-inference-cluster",
+    "section_anchor": "https://runbooks.internal.example/finops/gpu-cost-spike#idle-node-pool-scale-down",
+    "content": "If daily cloud spend on ml-inference-cluster exceeds the FinOps baseline budget by >40%, inspect unattached A100/H100 GPU replica node pools and runaway batch evaluation jobs. Scale down idle GPU nodes and enforce max-replica autoscaler quotas.",
+    "remediation_steps": [
+      "Run analyze_cloud_cost_anomaly_report for ml-inference-cluster.",
+      "Scale down idle GPU node pools and log governance tracking via record_postmortem_action_item."
+    ]
+  }
+]

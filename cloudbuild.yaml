@@ -1,0 +1,37 @@
+# ==============================================================================
+# Google Cloud Build CI/CD Pipeline for CloudOps Sentinel
+# Automated Ruff Linting, Golden Dataset Regression Evaluation, & Cloud Run Deploy
+# ==============================================================================
+steps:
+  - name: "python:3.11-slim"
+    id: "lint-and-evaluate"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        pip install --no-cache-dir -r requirements.txt -e .
+        ruff check .
+        ruff format --check .
+        pytest -v
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-container"
+    args:
+      - "build"
+      - "-t"
+      - "us-central1-docker.pkg.dev/$PROJECT_ID/cloudops-sentinel-repo/sentinel:$COMMIT_SHA"
+      - "."
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: "deploy-cloud-run"
+    entrypoint: "gcloud"
+    args:
+      - "run"
+      - "deploy"
+      - "cloudops-sentinel"
+      - "--image=us-central1-docker.pkg.dev/$PROJECT_ID/cloudops-sentinel-repo/sentinel:$COMMIT_SHA"
+      - "--region=us-central1"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+images:
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/cloudops-sentinel-repo/sentinel:$COMMIT_SHA"
